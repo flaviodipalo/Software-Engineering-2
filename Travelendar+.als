@@ -3,130 +3,302 @@ sig Stringa{}
 sig User{
 	name: one Stringa,
 	surname: one Stringa,
-	credentials: one Credentials,
-	attend: set Meeting
-}
-
-sig Credentials{
 	username: one Stringa,
-	password: one Stringa
+	password: one Stringa,
+	attend: set Activity
 }
 
-sig Meeting{
-	state: one MeetingState,
-	stage: some Stage
+abstract sig Activity{
+	state: one ActivityState,
+	route: lone Route,
+	schedulingDate: one Int,
+	endActivityDate: one Int,
+	alert: set Warning
+}{
+	schedulingDate >= 0 and
+	endActivityDate > schedulingDate
 }
 
-sig Stage{
-	state: one MeetingState,
+sig Meeting extends Activity{}
+
+sig FlexibleActivity extends Activity{
+	schedulingIntervalBegin: one Int,
+	schedulingIntervalEnd: one Int
+}{
+	schedulingIntervalBegin >= 0 and
+	schedulingIntervalEnd > schedulingIntervalBegin
+}
+
+sig Route{
+	stage: some SubRoute
+}
+
+sig SubRoute{
+	state: one ActivityState,
 	beginDate: one Int,
-	endDate: one Int
-}{beginDate >= 0 and endDate > beginDate}
+	endDate: one Int,
+	alert: lone Warning
+}{
+	beginDate >= 0 and 
+	endDate > beginDate
+}
 
-abstract sig MeetingState{}
-sig IN_PROGRESS extends MeetingState{}
-sig SCHEDULED extends MeetingState{}
-sig COMPLETED extends MeetingState{}
+abstract sig ActivityState{}
+sig IN_PROGRESS extends ActivityState{}
+sig SCHEDULED extends ActivityState{}
+sig COMPLETED extends ActivityState{}
 
+abstract sig Warning{}
+sig UNREACHABLE extends Warning{}
+sig RAIN extends Warning{}
+sig STRIKE extends Warning{}
+
+//Used for time clock
 sig System{
 	currentTime: one Int
-}{currentTime>=0}
+}{
+	currentTime>=0
+}
 
-//un solo sistema
-fact f0{
+//There is only one system with its current Time
+fact onlyOneSystem{
 	#System = 1
 }
 
-//non esistono due persone con lo stesso username
-fact f1{
-	no disj u1, u2: User | u1.credentials.username = u2.credentials.username
+//There is not two users with the same username
+fact noTwoUsersWithSameUsername{
+	no disj u1, u2: User | u1.username = u2.username
 }
 
-//non esistono credenziali senza il corrispettivo proprietario
-fact f2{
-	all c: Credentials | one u : User | u.credentials = c
+//An Activity is completed if and only if it's already finished 
+fact completedActivity{
+	all a: Activity | a.state in COMPLETED
+		iff
+	(all sys: System | sys.currentTime >= a.endActivityDate)
 }
 
-//se un meeting è completato allora tutti i suoi stages sono completati
-fact f3{
-	all m: Meeting | all s: Stage | s in m.stage and 
-		m.state in COMPLETED implies s.state in COMPLETED
+//An Activity is scheduled if and only if has not yet begun 
+// and neither the route has begun
+fact scheduledActivity{
+	all a: Activity, sys: System | a.state in SCHEDULED
+		iff
+	 (sys.currentTime =< a.schedulingDate and
+	  (all s: SubRoute | s in a.route.stage implies
+		s.state in SCHEDULED))
 }
 
-//se un meeting è solo programmato, allora tutti i suoi stage sono solo programmati
-fact f4{
-	all m: Meeting | all s: Stage | s in m.stage and 
-		m.state in SCHEDULED implies s.state in SCHEDULED
+//Each activity has its (unique) creator
+fact allActivityhasACreator{
+	all a: Activity | one u : User | a in u.attend
 }
 
-//se un meeting è in corso allora esiste uno e un solo stage in corso relativo al meeting
-fact f5{
-	all m: Meeting | m.state in IN_PROGRESS implies 
-		(one s: Stage | s in m.stage and s.state in IN_PROGRESS)
+//There are no routes without the corresponding activity
+fact allRouteshasAMotherActivity{
+	all r: Route | one a : Activity | r in a.route
 }
 
-//un utente può avere al massimo un solo meeting in corso
-fact f6{
-	all u: User | lone m:Meeting | m in u.attend and m.state in IN_PROGRESS
+//There are no subroutes without the corresponding route
+fact allSubRouteshasAMotherRoute{
+	all s: SubRoute | one r : Route | s in r.stage
 }
 
-//non esistono meeting senza il corrispettivo proprietario
-fact f7{
-	all m: Meeting | some u : User | m in u.attend
+//All subroutes scheduled prior to the current date are completed
+fact completedSubRoute{
+	all s: SubRoute | s.state in COMPLETED
+		iff
+	(all sys: System | s.endDate <= sys.currentTime)
 }
 
-//non esistono stage senza il corrispettivo meeting
-fact f8{
-	all s: Stage | one m : Meeting | s in m.stage
+//All subroutes scheduled after to the current date are scheduled
+fact scheduledSubRoute{
+	all s: SubRoute | s.state in SCHEDULED
+		iff
+	(all sys: System | s.beginDate >= sys.currentTime)
 }
 
-//tutti gli stage antecedenti alla data corrente sono completati
-//fact f9{
-//	all s: Stage | all sys: System | s.endDate <= sys.currentTime
-//		implies (s.state in COMPLETED)
-//}
-
-//tutti gli stage antecedenti alla data corrente sono completati
-fact f9{
-	all s: Stage | s.state in COMPLETED
-		implies (all sys: System | s.endDate <= sys.currentTime)
+//all subroutes in progress have sys.currentTime between 
+//begin-time and end-time
+fact inProgressSubRoute{
+	all s: SubRoute | s.state in IN_PROGRESS
+		iff
+			(all sys: System | s.beginDate < sys.currentTime
+				and sys.currentTime < s.endDate)
 }
 
-//tutti gli stage programmati dopo la data corrente sono nello stato di scheduling
-fact f10{
-	all s: Stage | s.state in SCHEDULED
-		implies (all sys: System | s.beginDate >= sys.currentTime)
+//there can be no two activities at the same time
+//e.g. Luca has two meeting, one from 2:00 to 5:00 and 
+// one from 3:00 to 6:00. This is impossible because at 4:00 Luca 
+//should attend two different meetings
+fact noTwistedActivity{
+	no disj a1, a2: Activity | one u: User |
+		a1 in u.attend and a2 in u.attend and
+			(some t: Int | 
+				t >= a1.schedulingDate and
+				t >= a2.schedulingDate and 
+				t < a1.endActivityDate and
+				t < a2.endActivityDate
+			)
 }
 
-//tutti gli stage in corso hanno sys.currentTime compreso tra inizio e fine
-fact f11{
-	all s: Stage | s.state in IN_PROGRESS
-		implies (all sys: System | s.beginDate < sys.currentTime
-			and sys.currentTime < s.endDate)
+//The example also applies to subroutes: 
+//If I'm traveling for meeting 2 then
+//I can not attend the meeting 1 at the same time
+fact noTwistedActivityOneWithARoute{
+	no disj a1, a2: Activity | one u: User |
+		#a1.route = 1 and #a2.route = 0 and
+		a1 in u.attend and a2 in u.attend and
+			(some t: Int | 
+				t >= a2.schedulingDate and 
+				t < a1.endActivityDate and
+				t < a2.endActivityDate and
+				(some s1: SubRoute | s1 in a1.route.stage and
+					t >= s1.beginDate)
+			)
 }
 
-//gli stages nei meeting sono ben formati (contiguità e coerenza)
-fact f12{
-	all m: Meeting | #m.stage > 1 implies
-			((one s: Stage| s in m.stage and no e:Stage|
-				s.beginDate = e.endDate) and
-			(one s: Stage| s in m.stage and no e:Stage|
-				e.beginDate = s.endDate))
+//The example also applies to two subroutes: 
+//If I'm traveling for meeting 1 then
+//I can not traveling for meeting 2 at the same time
+fact noTwistedActivityTwoWithARoute{
+	no disj a1, a2: Activity | one u: User |
+		#a1.route = 1 and #a2.route = 1 and
+		a1 in u.attend and a2 in u.attend and
+			(some t: Int | 
+				t < a1.endActivityDate and
+				t < a2.endActivityDate and
+				(some s1: SubRoute | s1 in a1.route.stage and
+					t >= s1.beginDate) and
+				(some s2: SubRoute | s2 in a2.route.stage and
+					t >= s2.beginDate)
+			)
 }
 
-//non ci sono più stages che iniziano allo stesso tempo nello stesso meeting
-fact f13{
-	no disj s1,s2: Stage | one m: Meeting |
-		s1 in m.stage and s2 in m.stage and s1.beginDate = s2.beginDate
+//there can be no two subroutes related of the same route 
+//scheduled at the same time
+fact noTwistedSubRoutes{
+	no disj s1, s2: SubRoute | one r: Route |
+		s1 in r.stage and s2 in r.stage and
+			(some t: Int | t >= s1.beginDate and
+				t >= s2.beginDate and 
+				t < s1.endDate and
+				t < s2.endDate)
 }
 
-//non ci sono più stages che finiscono allo stesso tempo nello stesso meeting
-fact f14{
-	no disj s1,s2: Stage | one m: Meeting |
-		s1 in m.stage and s2 in m.stage and s1.endDate = s2.endDate
+//there can no be a subroute scheduled after the end of activity
+fact noLateOrUselessSubRoutes{
+	no s: SubRoute | one a: Activity |
+		s in a.route.stage and
+		s.endDate >= a.endActivityDate
 }
+
+//all flexible activities must comply with their construction constraint
+fact allFlexibleActivityAreScheduledInTheGivenInterval{
+	all f: FlexibleActivity |
+		f.schedulingIntervalEnd >= f.endActivityDate and
+		f.schedulingIntervalBegin =< f.schedulingDate and
+		(all s: SubRoute | s in f.route.stage implies
+			f.schedulingIntervalBegin =< s.beginDate)
+}
+
+//WARNING CONSTRAINS
+
+//a warning always belongs to one activity
+fact oneActivityForEachWarning{
+	all w: Warning | one a:Activity| w in a.alert
+}
+
+//a warning always belongs to one subroute
+fact oneSubRouteForEachWarning{
+	all w: Warning | one s:SubRoute | w in s.alert
+}
+
+//if an activity contains a warning then 
+//there is a subroute that caused that warning. 
+//This subroute belongs to the activity's route
+fact thereIsAlwaysACauseOfTheWarning{
+	all a: Activity | a.alert = a.route.stage.alert
+}
+
+//a subroute is called unreachable if it makes the user late for
+// the appointment.
+fact definitionOfUnreachableSubRoute{
+	all s: SubRoute |
+		(some u: UNREACHABLE | u in s.alert)
+			iff
+		(s.endDate > s.~stage.~route.schedulingDate)
+}
+
+//the system can not scheduled unreachable flexible activity when 
+//it can fine scheduled the same flexible activity reachable.
+fact noUselessUnreachableWarningForFlexibleActivities{
+	all f: FlexibleActivity |
+		(some u: UNREACHABLE | u in f.alert)
+			implies
+		((some a: Activity | f.endActivityDate = a.schedulingDate)
+				or
+		(some s: SubRoute | f.endActivityDate = s.beginDate))
+}
+
+//if an activity with a route is completed then all its subroutines,
+//that belongs to the activity's route, are completed
+assert completedSubRoutesOnCompletedActivity{
+	all a: Activity | a.state in COMPLETED and #a.route = 1 
+		implies
+	(all s: SubRoute | s in a.route.stage implies a.state in COMPLETED) 
+}
+//check completedSubRoutesOnCompletedActivity
+//OK
+
+//if an activity with a route is scheduled then all its subroutines,
+//that belongs to the activity's route, are scheduled
+assert scheduledSubRoutesOnScheduledActivity{
+	all a: Activity | a.state in SCHEDULED and #a.route = 1 
+		implies
+	(all s: SubRoute | s in a.route.stage implies a.state in SCHEDULED) 
+}
+//check scheduledSubRoutesOnScheduledActivity
+//OK
+
+//if an activity with a route is in progress then all its subroutines,
+//that belongs to the activity's route, are in one of the following configurations
+//shown in the assertion
+assert subRoutesConstrainsOnActivityInProgress{
+	all a: Activity  | a.state in IN_PROGRESS and #a.route = 1
+		implies
+			((one s: SubRoute | s in a.route.stage and s.state in IN_PROGRESS)
+				or
+			((some s: SubRoute | s in a.route.stage and s.state in COMPLETED) 
+				and
+			(some s: SubRoute | s in a.route.stage and s.state in SCHEDULED))
+				or
+			(no s: SubRoute| s in a.route.stage and s.state not in SCHEDULED)
+				or
+			(no s: SubRoute| s in a.route.stage and s.state not in COMPLETED))
+}
+//check subRoutesConstrainsOnActivityInProgress
+//OK
+
+//A user can have at most one activity in progress
+assert onlyOneActivityInProgressForEachUser{
+	all u: User | lone a:Activity | 
+		a in u.attend and a.state in IN_PROGRESS
+}
+//check onlyOneActivityInProgressForEachUser
+//OK
+
+//If an activity has no warning then all his subroutes has no warning
+assert noWarningActivityImpliesNoWarningSubRoutes{
+	all a: Activity | a.alert = none implies
+		(all s: SubRoute | s in a.route.stage implies s.alert = none)
+}
+//check noWarningActivityImpliesNoWarningSubRoutes
+//OK
 
 pred show{
-	one m: Meeting | #m.stage = 4
+	#User = 1
+	#{x: FlexibleActivity | not x.alert = none} = 1
+	#{x: Warning | x not in UNREACHABLE} = 1
 }
-run show for 2 but 4 Stage
+run show for 3 but exactly 4 SubRoute, exactly 2 Route
+
+
