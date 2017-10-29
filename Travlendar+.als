@@ -83,8 +83,7 @@ fact scheduledActivity{
 	all a: Activity, sys: System | a.state in SCHEDULED
 		iff
 	 (sys.currentTime =< a.schedulingDate and
-	  (all s: SubRoute | s in a.route.stage implies
-		s.state in SCHEDULED))
+	  (all s: SubRoute | s in a.route.stage implies s.state in SCHEDULED))
 }
 
 //Each activity has its (unique) creator
@@ -207,16 +206,23 @@ fact oneActivityForEachWarning{
 	all w: Warning | one a:Activity| w in a.alert
 }
 
-//a warning always belongs to one subroute
+//a warning always belongs to one or zero subroute
 fact oneSubRouteForEachWarning{
-	all w: Warning | one s:SubRoute | w in s.alert
+	all w: Warning | lone s:SubRoute | w in s.alert
 }
 
-//if an activity contains a warning then 
+//if an activity contains a warning and a route then 
 //there is a subroute that caused that warning. 
 //This subroute belongs to the activity's route
 fact thereIsAlwaysACauseOfTheWarning{
-	all a: Activity | a.alert = a.route.stage.alert
+	all a: Activity | #a.route = 1 implies a.alert = a.route.stage.alert
+}
+
+//an activity without a route can have unreachable warning,
+//e.g. Luca, in Italy, wants to arrive at New York in 5 minutes
+fact activityWithoutRouteCanHaveOnlyUnreachableWarning{
+	all a: Activity | #a.route = 0 implies
+		(all w: Warning | w in a.alert implies w in UNREACHABLE)
 }
 
 //a subroute is called unreachable if it makes the user late for
@@ -234,9 +240,11 @@ fact noUselessUnreachableWarningForFlexibleActivities{
 	all f: FlexibleActivity |
 		(some u: UNREACHABLE | u in f.alert)
 			implies
-		((some a: Activity | f.endActivityDate = a.schedulingDate)
+		((some a: Activity | f.endActivityDate = a.schedulingDate 
+			and f.~attend = a.~attend)
 				or
-		(some s: SubRoute | f.endActivityDate = s.beginDate))
+		(some s: SubRoute | f.endActivityDate = s.beginDate
+			and f.~attend = s.~stage.~route.~attend))
 }
 
 //if an activity with a route is completed then all its subroutines,
@@ -259,21 +267,12 @@ assert scheduledSubRoutesOnScheduledActivity{
 //check scheduledSubRoutesOnScheduledActivity
 //OK
 
-//if an activity with a route is in progress then all its subroutines,
-//that belongs to the activity's route, are in one of the following configurations
-//shown in the assertion
+//if an activity with a route is in progress then there at most one subroute
+// in progress
 assert subRoutesConstrainsOnActivityInProgress{
 	all a: Activity  | a.state in IN_PROGRESS and #a.route = 1
 		implies
-			((one s: SubRoute | s in a.route.stage and s.state in IN_PROGRESS)
-				or
-			((some s: SubRoute | s in a.route.stage and s.state in COMPLETED) 
-				and
-			(some s: SubRoute | s in a.route.stage and s.state in SCHEDULED))
-				or
-			(no s: SubRoute| s in a.route.stage and s.state not in SCHEDULED)
-				or
-			(no s: SubRoute| s in a.route.stage and s.state not in COMPLETED))
+			(lone s: SubRoute | s in a.route.stage and s.state in IN_PROGRESS)
 }
 //check subRoutesConstrainsOnActivityInProgress
 //OK
@@ -294,11 +293,29 @@ assert noWarningActivityImpliesNoWarningSubRoutes{
 //check noWarningActivityImpliesNoWarningSubRoutes
 //OK
 
+pred twousers{
+	#User = 2
+	#Activity = 3
+	#{x: Warning | x in UNREACHABLE} > 0
+}
+
+pred activitywithoutroute{
+	#User = 1
+	#{x: Activity | #x.route = 0} >= 1
+	#Activity > 2
+}
+
+pred rainday{
+	#User < 3
+	#RAIN = 3
+	#{x: Warning | x not in RAIN} = 0
+	#{x: Meeting | #x.alert = 1} = 1
+}
+
 pred show{
 	#User = 1
 	#{x: FlexibleActivity | not x.alert = none} = 1
 	#{x: Warning | x not in UNREACHABLE} = 1
+	#{x: Activity | x.state in IN_PROGRESS} > 0
 }
 run show for 3 but exactly 4 SubRoute, exactly 2 Route
-
-
