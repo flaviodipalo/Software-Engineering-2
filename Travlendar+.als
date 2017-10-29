@@ -272,7 +272,7 @@ assert scheduledSubRoutesOnScheduledActivity{
 assert subRoutesConstrainsOnActivityInProgress{
 	all a: Activity  | a.state in IN_PROGRESS and #a.route = 1
 		implies
-			(lone s: SubRoute | s in a.route.stage and s.state in IN_PROGRESS)
+			(thereIsOneSubRouteInProgress[a] or thereIsNoSubRouteInProgress[a])
 }
 //check subRoutesConstrainsOnActivityInProgress
 //OK
@@ -293,6 +293,18 @@ assert noWarningActivityImpliesNoWarningSubRoutes{
 //check noWarningActivityImpliesNoWarningSubRoutes
 //OK
 
+pred addSubRoute[r,r':Route, s: SubRoute]{
+	r'.stage = r.stage + s
+}
+
+pred thereIsOneSubRouteInProgress[a: Activity]{
+	one s: SubRoute | s in a.route.stage and s.state in IN_PROGRESS
+}
+
+pred thereIsNoSubRouteInProgress[a: Activity]{
+	no s: SubRoute | s in a.route.stage and s.state in IN_PROGRESS
+}
+
 pred twousers{
 	#User = 2
 	#Activity = 3
@@ -310,6 +322,10 @@ pred rainday{
 	#RAIN = 3
 	#{x: Warning | x not in RAIN} = 0
 	#{x: Meeting | #x.alert = 1} = 1
+}
+
+pred showOnlyMeetingInProgressWithoutSubRouteInProgress{
+	#{x: Meeting | thereIsNoSubRouteInProgress[x]} = #Activity
 }
 
 pred show{
